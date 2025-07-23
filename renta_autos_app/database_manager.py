@@ -15,7 +15,7 @@ class DatabaseManager:
         try:
             self.pool = mysql.connector.pooling.MySQLConnectionPool(
                 pool_name="renta_autos_pool",
-                pool_size=5,  # Número de conexiones que se mantendrán abiertas
+                pool_size=5,
                 host=os.getenv('DB_HOST'),
                 user=os.getenv('DB_USER'),
                 password=os.getenv('DB_PASSWORD'),
@@ -27,7 +27,6 @@ class DatabaseManager:
             self.pool = None
 
     def get_connection(self):
-        """Obtiene una conexión del pool."""
         if self.pool:
             try:
                 return self.pool.get_connection()
@@ -37,95 +36,70 @@ class DatabaseManager:
         return None
 
     def execute_query(self, query, params=None):
-        """
-        Ejecuta consultas de tipo SELECT que devuelven datos.
-        - query: La consulta SQL con placeholders (%s).
-        - params: Una tupla de parámetros para la consulta.
-        - Retorna: Los resultados de la consulta.
-        """
         conn = self.get_connection()
-        if conn is None:
-            return None
-        
-        cursor = conn.cursor(dictionary=True) # Devuelve resultados como diccionarios
+        if conn is None: return None
+        cursor = conn.cursor(dictionary=True)
         results = None
         try:
             cursor.execute(query, params)
             results = cursor.fetchall()
-            # print("Consulta ejecutada con éxito.") # Descomentar para depuración
         except Error as e:
             print(f"Error al ejecutar la consulta: {e}")
         finally:
             cursor.close()
-            conn.close() # Devuelve la conexión al pool
+            conn.close()
         return results
 
     def execute_modification(self, query, params=None):
-        """
-        Ejecuta consultas de tipo INSERT, UPDATE, DELETE.
-        - query: La consulta SQL con placeholders (%s).
-        - params: Una tupla de parámetros para la consulta.
-        - Retorna: El ID de la última fila insertada si aplica, o None.
-        """
         conn = self.get_connection()
-        if conn is None:
-            return None
-            
+        if conn is None: return None
         cursor = conn.cursor()
         last_row_id = None
         try:
             cursor.execute(query, params)
-            conn.commit() # Confirma los cambios en la base de datos
+            conn.commit()
             last_row_id = cursor.lastrowid
-            # print("Modificación ejecutada con éxito.") # Descomentar para depuración
         except Error as e:
             print(f"Error al ejecutar la modificación: {e}")
-            conn.rollback() # Revierte los cambios en caso de error
-        finally:
-            cursor.close()
-            conn.close() # Devuelve la conexión al pool
-        return last_row_id
-        
-    def execute_procedure(self, procedure_name, params=None):
-        """
-        Ejecuta un procedimiento almacenado.
-        - procedure_name: El nombre del procedimiento.
-        - params: Una tupla de parámetros para el procedimiento.
-        - Retorna: El resultado del procedimiento.
-        """
-        conn = self.get_connection()
-        if conn is None:
-            return None
-
-        cursor = conn.cursor()
-        results = None
-        try:
-            # Los procedimientos almacenados se llaman con callproc
-            cursor.callproc(procedure_name, params)
-            conn.commit() # Importante para que los cambios del SP se guarden
-            
-            # Para obtener los resultados de los parámetros OUT
-            for result in cursor.stored_results():
-                results = result.fetchall()
-            
-            # print(f"Procedimiento '{procedure_name}' ejecutado con éxito.")
-        except Error as e:
-            print(f"Error al ejecutar el procedimiento almacenado: {e}")
             conn.rollback()
         finally:
             cursor.close()
             conn.close()
-        
-        return results
-
-
-# --- Ejemplo de uso (esto se puede eliminar más tarde) ---
-if __name__ == '__main__':
-    db_manager = DatabaseManager()
+        return last_row_id
     
-    if db_manager.pool:
-        print("\nProbando una consulta SELECT a la tabla 'roles':")
-        roles = db_manager.execute_query("SELECT * FROM roles")
-        if roles:
-            for rol in roles:
-                print(rol)
+    def get_all_models_for_dropdown(self):
+        query = """
+            SELECT m.id_modelo, CONCAT(b.nombre, ' ', m.nombre) AS display_name
+            FROM modelos m
+            JOIN marcas b ON m.id_marca = b.id_marca
+            ORDER BY display_name;
+        """
+        return self.execute_query(query)
+
+    # --- NUEVAS FUNCIONES PARA ALQUILERES ---
+    
+    def get_available_vehicles_for_dropdown(self):
+        """Obtiene vehículos con estado 'disponible' para los alquileres."""
+        query = """
+            SELECT 
+                v.id_vehiculo,
+                v.precio_diario,
+                CONCAT(b.nombre, ' ', m.nombre, ' (', v.placa, ')') AS display_name
+            FROM vehiculos v
+            JOIN modelos m ON v.id_modelo = m.id_modelo
+            JOIN marcas b ON m.id_marca = b.id_marca
+            WHERE v.estado = 'disponible'
+            ORDER BY display_name;
+        """
+        return self.execute_query(query)
+
+    def get_clients_for_dropdown(self):
+        """Obtiene todos los usuarios que son clientes."""
+        query = """
+            SELECT u.id_usuario, CONCAT(u.nombre, ' ', u.apellido, ' (', u.username, ')') AS display_name
+            FROM usuarios u
+            JOIN roles r ON u.id_rol = r.id_rol
+            WHERE r.nombre = 'cliente' AND u.activo = TRUE
+            ORDER BY u.apellido;
+        """
+        return self.execute_query(query)
